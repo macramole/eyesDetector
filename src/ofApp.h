@@ -18,9 +18,29 @@ class ofApp : public ofBaseApp{
 		int VIDEO_WIDTH;
 		int VIDEO_HEIGHT;
 		const float VIDEO_SKIP_SPEED = 3;
-		const float VIDEO_MATCH_SPEED = 0.5;
+		const float VIDEO_MATCH_SPEED = 1;
+		float currentSpeed = VIDEO_MATCH_SPEED;
+		const bool ANALYZE_MODE = false;
 
-		bool saveFrame = false;
+		const string OUTPUT_DIRECTORY = "recorder/";
+
+		/*
+			Track and record frames to OUTPUT_DIRECTORY
+			if age of consent is reached
+		*/
+		bool enableRecordEyes = true;
+		void recordEyes();
+		void recordCurrentFrame(int currentFrame);
+		void recordCurrentFrame();
+		void checkLastRecord();
+		string recordConstructPath(int frameNumber);
+		const int RECORD_FORCE_WIDTH = 440;
+		vector<int> recordedFrames;
+		int recordedChunks = 0;
+		int discardedChunks = 0;
+		int recordedFramesAll = 0;
+
+		// bool saveFrame = false;
 
 		CurrentRectangle currentRectangle;
 		// int currentRectangleFrames = 0;
@@ -40,6 +60,7 @@ class ofApp : public ofBaseApp{
 		void drawCurrentRectangle();
 		void drawEyes();
 		void drawCentroPromedio();
+		void drawProgress();
 
 		void processCurrentRectangle();
 		bool isAnyRectangleInsideCurrentRectangle();

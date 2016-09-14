@@ -25,22 +25,58 @@ void ofApp::update(){
     player.update();
     cvFinder.findHaarObjects(player.getPixels(), FINDER_MIN_WIDTH, FINDER_MIN_HEIGHT);
     // cvFinder.findHaarObjects(player.getPixels());
-    currentRectangle.process( cvFinder.blobs );
-    checkNoEyes();
+
+    int processStatus = currentRectangle.process( cvFinder.blobs );
+    switch (processStatus) {
+        // case CurrentRectangle.STATUS_NO_EYES:
+        // case CurrentRectangle.STATUS_WITH_EYES:
+        case CurrentRectangle::STATUS_NEW_EYES:
+            ofLog() << "Eyes detected";
+            break;
+        case CurrentRectangle::STATUS_AGE_UP:
+            ofLog() << "Age is " << currentRectangle.age;
+            break;
+        case CurrentRectangle::STATUS_AGE_OF_CONSENT_REACHED:
+            ofLog() << "Age of consent reached";
+            break;
+        case CurrentRectangle::STATUS_EYES_LOST:
+            ofLog() << "Eyes lost";
+            checkLastRecord();
+            break;
+    }
+
+    if ( player.isFrameNew() ) {
+        checkNoEyes();
+        recordEyes();
+    }
+
+    if ( player.getIsMovieDone() ) {
+        ofLog() << "Finished";
+        ofLog() << "********\n\n";
+        ofLog() << "recorded chunks: " << recordedChunks;
+        ofLog() << "discarded chunks: " << discardedChunks;
+        ofLog() << "seconds elapsed: " << ofGetElapsedTimef();
+        ofLog() << "video length: " << player.getDuration();
+        ofExit(0);
+    }
 }
 
 void ofApp::checkNoEyes(){
     if ( cvFinder.blobs.size() == 0 ) {
         framesWithoutEyes++;
     } else {
-        if ( framesWithoutEyes != 0 ) {
-            player.setSpeed(VIDEO_MATCH_SPEED);
+        if ( framesWithoutEyes != 0 && currentSpeed != VIDEO_MATCH_SPEED ) {
+            ofLog() << "Video speed: Match (x" << VIDEO_MATCH_SPEED << ")";
+            currentSpeed = VIDEO_MATCH_SPEED;
+            player.setSpeed(currentSpeed);
         }
         framesWithoutEyes = 0;
     }
 
     if ( framesWithoutEyes == 100 ) {
-        player.setSpeed(VIDEO_SKIP_SPEED);
+        ofLog() << "Video speed: Skip (x" << VIDEO_SKIP_SPEED << ")";
+        currentSpeed = VIDEO_SKIP_SPEED;
+        player.setSpeed(currentSpeed);
     }
 }
 //--------------------------------------------------------------
@@ -48,13 +84,61 @@ void ofApp::draw(){
     ofBackground(0);
 
     ofNoFill();
-    drawVideo();
-    drawRaw();
-    drawCurrentRectangle();
-    drawEyes();
-    drawCentroPromedio();
+
+    if ( ANALYZE_MODE ) {
+        drawVideo();
+        drawRaw();
+        drawCurrentRectangle();
+        drawCentroPromedio();
+        drawEyes();
+    } else {
+        drawProgress();
+    }
 }
 
+void ofApp::drawProgress() {
+    ofSetColor(255);
+    font.drawString(
+        "Time: " + ofToString(floor(player.getPosition() * player.getDuration())) + "/" + ofToString(player.getDuration()),
+        5,
+        20);
+
+    font.drawString(
+        "Chunks recorded: " + ofToString(recordedChunks),
+        5,
+        40);
+    font.drawString(
+        "Chunks discarded: " + ofToString(discardedChunks),
+        5,
+        60);
+
+    if ( currentSpeed == VIDEO_SKIP_SPEED ) {
+        ofSetColor(0,255,0);
+        font.drawString(
+            "SKIP SPEED ON (x" + ofToString(VIDEO_SKIP_SPEED) + ")",
+            5,
+            80);
+        ofSetColor(255);
+    } else {
+        font.drawString(
+            "NORMAL SPEED (x" + ofToString(VIDEO_MATCH_SPEED) + ")",
+            5,
+            80);
+    }
+
+    if ( !currentRectangle.isEmpty() ) {
+        if ( currentRectangle.age >= currentRectangle.AGE_OF_CONSENT ) {
+            ofSetColor(255,0,0);
+        } else {
+            ofSetColor(255,255,0);
+        }
+        font.drawString(
+            "RECORDING (age: " + ofToString(currentRectangle.age) + ")" ,
+            5,
+            100);
+        ofSetColor(255);
+    }
+}
 void ofApp::drawVideo() {
     ofSetColor(255);
     player.draw(0,0);
@@ -137,10 +221,74 @@ void ofApp::drawEyes() {
     );
 }
 
+void ofApp::recordCurrentFrame() {
+    recordCurrentFrame( player.getCurrentFrame() );
+}
+void ofApp::recordCurrentFrame(int currentFrame) {
+    ofImage frame;
+    frame.setFromPixels( player.getPixels() );
+    frame.crop(
+        currentRectangle.rect.getTopLeft().x,
+        currentRectangle.rect.getTopLeft().y,
+        currentRectangle.rect.getWidth(),
+        currentRectangle.rect.getHeight()
+    );
+    frame.resize(RECORD_FORCE_WIDTH, RECORD_FORCE_WIDTH / currentRectangle.RECTANGLE_FORCE_ASPECT_RATIO);
+    frame.save( recordConstructPath(currentFrame) );
+}
+string ofApp::recordConstructPath(int currentFrame) {
+    string savePath = OUTPUT_DIRECTORY + arguments.at(1) + "_";
+    string strCurrentFrame = ofToString(currentFrame);
+    strCurrentFrame.insert( strCurrentFrame.begin(), 10 - strCurrentFrame.length(), '0' );
+    savePath += strCurrentFrame;
+    savePath += ".jpg";
+
+    return savePath;
+}
+
+void ofApp::recordEyes() {
+    if ( enableRecordEyes ) {
+        if ( !currentRectangle.isEmpty() ) {
+            // int currentFrame = player.getCurrentFrame();
+            // if ( currentFrame > -1 ) {
+                // if ( std::find(recordedFrames.begin(), recordedFrames.end(), currentFrame) == recordedFrames.end() ) { //si no está
+                    recordedFramesAll++;
+                    recordCurrentFrame(recordedFramesAll);
+                    recordedFrames.push_back(recordedFramesAll);
+
+                // }
+            // }
+        }
+    }
+}
+
+void ofApp::checkLastRecord() {
+    string dataPath = "bin/data/";
+
+    if ( currentRectangle.previousRectangleAge < currentRectangle.AGE_OF_CONSENT ) {
+        discardedChunks++;
+        ofLog() << "Age of consent not reached, deleting recorded frames...";
+        for ( int i = 0 ; i < recordedFrames.size() ; i++ ) {
+            ofSystem("rm " + dataPath + recordConstructPath(recordedFrames[i]) );
+        }
+    } else {
+        recordedChunks++;
+        int framesToRemove = currentRectangle.getPreviousRectangleLastYearNumFrames();
+        framesToRemove = floor( framesToRemove * 0.8 );
+        ofLog() << "Chunk recorded, removing last " << framesToRemove << " frames";
+
+        for ( int i = recordedFrames.size() - framesToRemove ; i < recordedFrames.size() ; i++ ) {
+            ofSystem("rm " + dataPath + recordConstructPath(recordedFrames[i]) );
+        }
+
+    }
+
+    recordedFrames.clear();
+}
+
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key){
     if ( key == 'd' ) {
-//        ofLog(OF_LOG_WARNING, ofToString( player.getPosition() ));
         ofLog(OF_LOG_NOTICE, "Position: " + ofToString(player.getPosition()));
         player.setPosition( player.getPosition() + 0.01 );
     }
@@ -150,16 +298,7 @@ void ofApp::keyPressed(int key){
     }
     if ( key == 's' ) {
         ofLog(OF_LOG_NOTICE, "Saving...");
-
-        ofImage frame;
-        frame.setFromPixels( player.getPixels() );
-        frame.crop(
-            currentRectangle.rect.getTopLeft().x,
-            currentRectangle.rect.getTopLeft().y,
-            currentRectangle.rect.getWidth(),
-            currentRectangle.rect.getHeight()
-        );
-        frame.save(arguments.at(1) + "_" + ofToString(player.getCurrentFrame()) + ".jpg");
+        recordCurrentFrame();
         ofLog(OF_LOG_NOTICE, "Saved");
 
     }
